@@ -121,8 +121,10 @@ production-ready build on top of it.
   the repo (see `rules/README.md`).
 - **Durable state** — blocks, dossiers, reputation, baselines, and pending
   intel findings survive a server restart in a file-backed store
-  (`src/data/state.json`, atomic tmp+rename writes). See "Production deploy"
-  for the Render free-tier caveat.
+  (`src/data/state.json`, atomic tmp+rename writes) — and survive a
+  **redeploy** too when `DATABASE_URL` is set, via the Postgres adapter
+  (`src/pgStore.js`, one table, one JSONB row, atomic upserts). See
+  "Persistent state" below.
 - **Health & readiness** — `GET /healthz` (liveness) and `GET /readyz`
   (readiness: library loaded, AgentPulse feed state). Structured JSON
   logging throughout; request bodies capped at 64 KB, URLs at 2,048 chars,
@@ -229,14 +231,48 @@ filesystem is ephemeral, so a **redeploy resets state** (blocks, dossiers,
 reputation, baseline) to a fresh start. That is the documented trade-off
 of the free tier, not a bug.
 
-The production step, when the site is ready to pay for it, is one of:
+## Persistent state
 
-1. A Render **persistent disk** mounted at `src/data`, or
-2. A `DATABASE_URL` Postgres adapter behind the same store interface
-   (the store is the only component that touches persistence).
+Set `DATABASE_URL` and the guard's memory survives redeploys. The adapter
+(`src/pgStore.js`, `pg` package) activates only when `DATABASE_URL` is
+set; when it is unset, behaviour is exactly as before (file-backed
+`src/data/state.json`). One table (`verigus_state`), one row
+(`key = 'guard-state'`), the whole state document as JSONB, written with
+atomic upserts; the state loads at startup before the server serves
+anything. On first boot against an empty database, a local
+`src/data/state.json` with content is seeded into Postgres, so a live
+guard's learned state carries over. If a configured Postgres is
+unreachable, the server fails fast at startup instead of serving with
+amnesia (a silently empty block list would un-block agents). The
+connection string is never logged; startup logs only which backend is
+active (`file` or `postgres`).
 
-Either way the guard's interface does not change. Do not switch the live
-deployment to a paid plan without the owner's say-so — the free tier stays.
+Free option (no paid plan, no disk):
+
+1. Create a free project at [Neon](https://neon.tech) (Neon's Free plan
+   has no time limit and needs no credit card — verified 2026-11-26).
+   Render's own free Postgres expires after 90 days, which is why Neon
+   is the pick.
+2. In the Neon dashboard, copy the connection string for the project
+   database. It looks like
+   `postgres://<user>:<password>@<host>.neon.tech/<db>?sslmode=require`
+   — TLS is required and the adapter enables it automatically for Neon
+   hosts and `sslmode=require`.
+3. In Render, open the `verigus` service → **Environment** → add
+   `DATABASE_URL` with that value. Never put the value in the repo, in
+   `render.yaml`, or in a committed `.env` (`.env` is gitignored).
+4. Redeploy (or wait for the next push). The log line
+   `State backend: Postgres (DATABASE_URL)` confirms the adapter is
+   active. Verify with:
+   `curl https://verigus.onrender.com/api/status` — after a redeploy the
+   guard should resume in its previous mode with its previous
+   `requestsSeen` / `blockedForever`, instead of a fresh OBSERVE.
+
+To go back to the file store, remove `DATABASE_URL` from Render and
+redeploy. The paid alternative remains a Render persistent disk mounted
+at `src/data` (needs the Starter plan) — do not switch the live
+deployment to a paid plan without the owner's say-so; the free tier
+stays.
 
 ## Project layout
 
@@ -258,7 +294,9 @@ src/
   rules.js           Community rules marketplace loader (+ rules/)
   agentContract.js   Published agent contract + sanctioned MCP door
   gatewayPlugin.js   Node middleware for gateway deploys
-  store.js           Durable file-backed state (blocks, reputation, baseline)
+  store.js           Durable state (file-backed by default, Postgres via
+                     DATABASE_URL — see "Persistent state")
+  pgStore.js         Postgres backend for the store (one table, one JSONB row)
   audit.js           Structured JSON logging + audit log + SIEM webhook
   threatLibrary.js   Daily-refreshing library (seeded from documented research)
   agentpulse.js      Live AgentPulse feed + breaking-change re-check trigger
@@ -280,6 +318,8 @@ test/
   guard.test.js      Unit tests (scoring, fast path, final blocks)
   production.test.js Production tests (Web Bot Auth, mandates, policies,
                      reputation, intel, integrity, injection, rules, store)
+  pgStore.test.js    Postgres adapter tests (fake pg Pool; live-DB test
+                     skips unless DATABASE_URL is set and reachable)
 install.sh           One-line install
 render.yaml          Render Blueprint (free Web Service, auto-deploy)
 ```

@@ -50,35 +50,101 @@ try {
 }
 
 // --- Wire the guard --------------------------------------------------------
-const store = new Store();
-const audit = new AuditLog();
-const registry = webBotAuth.loadRegistry();
-const demoKeyRecord = { operator: 'demo-agent', keyid: 'demo-agent-key-1', publicKey: demoKeypair.publicKeyPem, domain: 'demo.local' };
-registry.byOperator.set('demo-agent', demoKeyRecord);
-registry.byKeyid.set('demo-agent-key-1', demoKeyRecord);
+// These are assigned in main() before the server starts listening: the
+// store load is async when DATABASE_URL is set (Postgres), and the guard
+// must see the restored blocks/baseline before it serves anything.
+let store, audit, registry, agentPulse, library, reputation, policies, rules, integrity, intel, guard, server;
 
-const agentPulse = new AgentPulseFeed();
-const library = new ThreatLibrary(agentPulse);
-const reputation = new ReputationRegistry(store);
-const policies = loadPolicies();
-const rules = new RuleMarketplace();
-const integrity = new IntegrityWatch();
-const intel = new IntelNetwork(store, library);
-library.intelNetwork = intel;
-const guard = new Guard({ library, agentPulse, registry, store, reputation, policies, rules, integrity, intel, audit });
+async function main() {
+  // Durable state: Postgres when DATABASE_URL is set, file otherwise.
+  // Throws (fail fast) if a configured Postgres is unreachable — serving
+  // with amnesia while believing state is durable would silently
+  // un-block agents.
+  store = await Store.create();
+  audit = new AuditLog();
+  registry = webBotAuth.loadRegistry();
+  const demoKeyRecord = { operator: 'demo-agent', keyid: 'demo-agent-key-1', publicKey: demoKeypair.publicKeyPem, domain: 'demo.local' };
+  registry.byOperator.set('demo-agent', demoKeyRecord);
+  registry.byKeyid.set('demo-agent-key-1', demoKeyRecord);
 
-// Daily Threat Library refresh, on schedule from day one (includes the
-// cross-site intel merge).
-setInterval(() => {
-  library.dailyRefresh()
-    .then((r) => log('info', 'library_refresh', { added: r.added, version: library.version, intelMerged: r.intelMerged || 0 }))
-    .catch((e) => log('warn', 'library_refresh_failed', { error: String(e.message || e) }));
-}, config.libraryRefreshMs);
+  agentPulse = new AgentPulseFeed();
+  library = new ThreatLibrary(agentPulse);
+  reputation = new ReputationRegistry(store);
+  policies = loadPolicies();
+  rules = new RuleMarketplace();
+  integrity = new IntegrityWatch();
+  intel = new IntelNetwork(store, library);
+  library.intelNetwork = intel;
+  guard = new Guard({ library, agentPulse, registry, store, reputation, policies, rules, integrity, intel, audit });
 
-// Initial AgentPulse poll (non-blocking; guard works without it).
-agentPulse.poll()
-  .then(() => log('info', 'agentpulse_connected', {}))
-  .catch((e) => log('warn', 'agentpulse_unavailable', { error: String(e.message || e) }));
+  // Which state backend is active (the connection string is never logged).
+  if (store.backendKind === 'postgres') {
+    log('info', 'store_backend', { backend: 'postgres', seededFromFile: store.seededFromFile });
+    console.log('  State backend: Postgres (DATABASE_URL) — blocks, reputation and baseline survive redeploys.');
+  } else {
+    log('info', 'store_backend', { backend: 'file', path: store.path });
+    console.log('  State backend: file (src/data/state.json) — resets on Render redeploy; set DATABASE_URL for durable state.');
+  }
+
+  // Graceful shutdown (Render sends SIGTERM on redeploy): flush pending
+  // state and close the pool before exiting.
+  const shutdown = async () => { try { await store.close(); } catch (_) {} process.exit(0); };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+
+  // Daily Threat Library refresh, on schedule from day one (includes the
+  // cross-site intel merge).
+  setInterval(() => {
+    library.dailyRefresh()
+      .then((r) => log('info', 'library_refresh', { added: r.added, version: library.version, intelMerged: r.intelMerged || 0 }))
+      .catch((e) => log('warn', 'library_refresh_failed', { error: String(e.message || e) }));
+  }, config.libraryRefreshMs);
+
+  // Initial AgentPulse poll (non-blocking; guard works without it).
+  agentPulse.poll()
+    .then(() => log('info', 'agentpulse_connected', {}))
+    .catch((e) => log('warn', 'agentpulse_unavailable', { error: String(e.message || e) }));
+
+  // Data-integrity watch: register the site content the guard protects, and
+  // re-hash it every 60 s. An unapproved change is a poisoning signal.
+  integrity.registerContent('catalog', shopContentTexts().catalog);
+  integrity.registerContent('pricing', shopContentTexts().pricing);
+  setInterval(() => {
+    const changed = integrity.checkContent(shopContentTexts());
+    for (const c of changed) {
+      guard.recordIntegrityFinding({ kind: 'content-changed', id: c.id, detail: `Content "${c.id}" changed without an approved update — possible poisoning.` });
+    }
+  }, 60 * 1000);
+
+  server = http.createServer((req, res) => {
+    handleRequest(req, res).catch((err) => {
+      log('error', 'request_failed', { path: req.url, error: String(err.message || err) });
+      if (!res.headersSent) sendJson(res, 500, { error: 'internal error' });
+    });
+  });
+
+  server.listen(config.port, () => {
+    log('info', 'server_started', {
+      port: config.port,
+      site: config.siteName,
+      mode: 'OBSERVE',
+      libraryVersion: library.version,
+      demoOperator: 'demo-agent (Web Bot Auth Ed25519 keypair generated at first start)',
+    });
+    console.log(`Verigus listening on http://localhost:${config.port}`);
+    console.log(`  Demo shop:   http://localhost:${config.port}/`);
+    console.log(`  Dashboard:   http://localhost:${config.port}/dashboard  (read-only)`);
+    console.log(`  Guard mode:  OBSERVE — learning the site baseline before any enforcement.`);
+    console.log(`  Try it:      npm run simulate`);
+  });
+
+  module.exports = { server, guard, library, agentPulse, store, reputation, policies, rules, integrity, intel, audit, registry };
+}
+
+main().catch((err) => {
+  console.error('Verigus failed to start:', err && err.message ? err.message : err);
+  process.exit(1);
+});
 
 // --- Demo shop data (fictional, for the working model) ----------------------
 const ORIGINAL_DESCRIPTIONS = {
@@ -97,22 +163,13 @@ const PRODUCTS = [
 ];
 const ORDERS = [{ id: 'ord-1', status: 'shipped' }];
 
-// Data-integrity watch: register the site content the guard protects, and
-// re-hash it every 60 s. An unapproved change is a poisoning signal.
+// Site content the integrity watch registers (registered in main()).
 function shopContentTexts() {
   return {
     catalog: JSON.stringify(PRODUCTS),
     pricing: JSON.stringify(PRODUCTS.map((p) => ({ id: p.id, price: p.price }))),
   };
 }
-integrity.registerContent('catalog', shopContentTexts().catalog);
-integrity.registerContent('pricing', shopContentTexts().pricing);
-setInterval(() => {
-  const changed = integrity.checkContent(shopContentTexts());
-  for (const c of changed) {
-    guard.recordIntegrityFinding({ kind: 'content-changed', id: c.id, detail: `Content "${c.id}" changed without an approved update — possible poisoning.` });
-  }
-}, 60 * 1000);
 
 // --- HTTP helpers ------------------------------------------------------------
 const MAX_URL_LENGTH = 2048;
@@ -246,13 +303,8 @@ function api(req, res) {
 }
 
 // --- HTTP server ---------------------------------------------------------------
-const server = http.createServer((req, res) => {
-  handleRequest(req, res).catch((err) => {
-    log('error', 'request_failed', { path: req.url, error: String(err.message || err) });
-    if (!res.headersSent) sendJson(res, 500, { error: 'internal error' });
-  });
-});
-
+// Created and listened in main(), after the store has loaded — the guard
+// must see restored state before it serves anything.
 async function handleRequest(req, res) {
   // Input validation: URL and header caps (Node caps headers at 16 KB each
   // by default; these are belt-and-braces limits for the guard's own log).
@@ -411,19 +463,5 @@ async function handleRequest(req, res) {
   }
 }
 
-server.listen(config.port, () => {
-  log('info', 'server_started', {
-    port: config.port,
-    site: config.siteName,
-    mode: 'OBSERVE',
-    libraryVersion: library.version,
-    demoOperator: 'demo-agent (Web Bot Auth Ed25519 keypair generated at first start)',
-  });
-  console.log(`Verigus listening on http://localhost:${config.port}`);
-  console.log(`  Demo shop:   http://localhost:${config.port}/`);
-  console.log(`  Dashboard:   http://localhost:${config.port}/dashboard  (read-only)`);
-  console.log(`  Guard mode:  OBSERVE — learning the site baseline before any enforcement.`);
-  console.log(`  Try it:      npm run simulate`);
-});
-
-module.exports = { server, guard, library, agentPulse, store, reputation, policies, rules, integrity, intel, audit, registry };
+// (server.listen and module.exports live in main(), above — the server
+// only starts after the store has loaded.)

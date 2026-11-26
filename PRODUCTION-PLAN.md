@@ -97,3 +97,106 @@ Observe-first; weights 40/25/20/15; fast path only identity + authentic behaviou
 
 ## 6. Delivery order
 1. This plan. 2. Store/audit/logging/health plumbing. 3. Web Bot Auth + firstContact rewire. 4. Delegation + policies. 5. Injection + integrity. 6. Decoy L4. 7. Agent contract + edge/gateway/onboard. 8. Reputation + intel + library merge. 9. Rules marketplace. 10. Compliance/SIEM/audit endpoints + dashboard. 11. Baseline persistence. 12. README/install. 13. Tests + local e2e (`npm run simulate`, `simulate:breaking-change`). 14. Push (snapshot-push procedure; verify head still `eb6109e8…` first; only after live sim settles ~590+). 15. Wait for Render auto-deploy, verify live, report.
+
+## Delivery notes (v0.2.0, 2026-11-26)
+
+Built, tested, and pushed. `npm test`: 24/24 pass (7 pre-existing guard tests
++ 17 production tests). Local end-to-end verified against a fresh server:
+guard flipped OBSERVE → ENFORCE (confidence 0.8, 180 warm-up requests);
+full simulator + breaking-change ran clean (636 requests, 24 agents,
+3 blocked, 1 fast path).
+
+Bugs found by the tests/simulator and fixed during this build:
+1. `webBotAuth.parseSignatureInput` extracted covered components from the
+   label (`m[1]`, i.e. `sig1`) instead of the parenthesised list (`m[2]`) —
+   every Web Bot Auth attestation failed verification. Fixed.
+2. Injection regexes allowed only one modifier word, so "ignore all previous
+   instructions" did not match. Fixed to allow chained modifiers.
+3. Injection scanning ran on URL-encoded query text (`%20` is not `\s`), so
+   encoded payloads and echo text were missed. `scanRequest`/`scanEcho` now
+   URL-decode first.
+4. `IntegrityWatch` scanned content for injected instructions only at
+   registration (clean content), never when a change was detected — poisoned
+   snippets were never recorded and echo detection could not fire.
+   `checkContent` now scans changed content.
+5. `server.js` owner-API interception regex had an unbalanced parenthesis
+   (SyntaxError at startup). Fixed and re-verified.
+
+Push: commit `8dc9fb4e462f3dfcec1bc1abfca512bbbabe5d19` on main (44 files),
+head confirmed on GitHub. Sync record updated (3 entries).
+
+Live deploy status (2026-11-26 ~23:24 UTC): the Render auto-deploy had NOT
+yet reflected the new version after ~17 minutes of polling
+(`https://verigus.onrender.com/api/status` still shows the v0.1 build:
+ENFORCE, 575 requests, 2 blocked, no `policies`/`rules`/`integrity`
+fields). The commit is on GitHub main; `render.yaml` is unchanged and
+sound (`npm install` / `npm start`). The Render dashboard needs a check —
+the deploy may be queued, or auto-deploy may need a manual trigger.
+Re-check live with: `curl https://verigus.onrender.com/api/status` — the
+new build shows `policies`, `rules`, `integrity`, `intel`, and `reputation`
+sections, and starts in OBSERVE with requestsSeen 0 (redeploy resets the
+ephemeral filesystem, as documented).
+
+---
+
+## Delivery note — Postgres persistence adapter (2026-11-26, option 2)
+
+Akshat chose option 2: free external Postgres (Neon free tier) via a
+DATABASE_URL adapter, NOT the $7/mo Render disk. Implemented locally;
+NOT pushed, NOT deployed — provisioning and deploy need his go-ahead.
+
+Design (one table, one JSONB row — `src/pgStore.js`): the store already
+holds the whole guard state as one JSON document (`src/data/state.json`),
+so the Postgres backend keeps exactly that shape: table `verigus_state`
+(key TEXT PRIMARY KEY, state JSONB, updated_at), one row
+key='guard-state', written with a single atomic upsert
+(`INSERT ... ON CONFLICT DO UPDATE`). Per-entity tables were considered
+and rejected: they would add migrations and joins for a six-field
+document the guard always reads and writes whole, and the atomic
+whole-document upsert is what makes a block never half-persist. Cost of
+the choice: every write rewrites the whole document — fine at this
+scale (tens of KB), and writes are debounced (2 s) plus flushed
+immediately on block.
+
+Files changed:
+- `src/pgStore.js` (new): PostgresBackend (ensureSchema/load/save/close),
+  TLS handling (Neon hosts and sslmode=require get TLS; sslmode=disable
+  gets none), pool factory injection for tests. Never logs the URL.
+- `src/store.js`: `normalizeState()` extracted (shared by both loaders);
+  `Store.create()` async factory — Postgres when DATABASE_URL is set,
+  file exactly as before when unset; seeds Postgres from a local
+  state.json on first boot when the table is empty; fail-fast throw if
+  the DB is unreachable; writes serialized through a promise chain;
+  `close()` flushes then ends the pool.
+- `src/server.js`: startup is now async — `await Store.create()` before
+  the guard is wired and before `listen`; logs which backend is active
+  (never the connection string); SIGTERM/SIGINT flush + pool close.
+- `package.json` / `package-lock.json`: `pg` 8.23.1 added (only new dep);
+  test script now includes `test/pgStore.test.js`.
+- `test/pgStore.test.js` (new): 9 adapter tests over an in-memory fake
+  pg Pool (schema SQL, upsert SQL, round-trip across a restart, seed
+  from file, file fallback, fail-fast, debounce coalescing, TLS flags)
+  plus a live-DB test that skips unless DATABASE_URL is set and
+  reachable, using its own row key so it can never touch real state.
+- `README.md`: "Persistent state" section (Neon free-tier steps,
+  DATABASE_URL on Render, fallback, fail-fast, verification).
+
+Tests: `npm test` — 34 tests, 33 pass, 0 fail, 1 skipped (the live-DB
+test; no Postgres in this environment). All 24 pre-existing tests pass.
+Verified locally: file-mode server boots and serves (ENFORCE from the
+local learned state, /products 200, /.env 403, dashboard 200, startup
+log names the file backend); bogus DATABASE_URL exits 1 with
+"Postgres store unreachable (DATABASE_URL): connect ECONNREFUSED".
+
+Left for the provisioning step (needs Akshat's go-ahead at each step):
+1. Create the free Neon project and copy its connection string.
+2. Set DATABASE_URL on the Render `verigus` service (Environment tab).
+3. Redeploy and verify: log line "State backend: Postgres
+   (DATABASE_URL)" and `/api/status` keeping its mode/requestsSeen/
+   blockedForever across a redeploy. Note: the CURRENT live instance
+   has only the fresh post-redeploy OBSERVE state (a few requests), so
+   there is little learned state to seed — the first Postgres boot will
+   most likely start from an empty table, which is fine.
+4. Optional: set DATABASE_URL locally and run the live-DB test:
+   `DATABASE_URL='postgres://...' npm test` (it uses row
+   'guard-state-test' and deletes it afterwards).
