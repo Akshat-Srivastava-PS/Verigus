@@ -1,0 +1,166 @@
+{
+  "entries": [
+    {
+      "category": "prompt-injection",
+      "description": "Hidden instructions in pages, comments, docs or tool outputs that hijack an agent that reads them. The root cause of most other items; zero-click; any user-generated content on the site can carry it.",
+      "id": "indirect-prompt-injection",
+      "match": {},
+      "name": "Indirect prompt injection via content the agent reads",
+      "severity": "high",
+      "source": "https://www.promptfoo.dev/blog/indirect-prompt-injection-web-agents/",
+      "note": "Documented pattern; live detection needs content inspection of search queries and page text, not wired into this working model."
+    },
+    {
+      "category": "mcp",
+      "description": "An agent is steered by a poisoned MCP tool description before any tool is called; secrets smuggled in parameters. Reported success up to 72.8% in MCPTox research (exact counts disputed between paper versions \u2014 treat as indicative).",
+      "id": "tool-poisoning",
+      "match": {
+        "pathPatterns": [
+          "/api/v1/"
+        ]
+      },
+      "name": "Tool poisoning / poisoned MCP tool descriptions",
+      "severity": "high",
+      "source": "https://arxiv.org/abs/2508.14925"
+    },
+    {
+      "category": "exfiltration",
+      "description": "Theft leaves through benign-looking channels: public comments, Markdown image URLs, extra tool parameters. Destination + encoded payload are detectable.",
+      "id": "exfiltration-benign-channels",
+      "match": {
+        "pathPatterns": [
+          "/api/v1/orders"
+        ]
+      },
+      "name": "Exfiltration via benign channels",
+      "severity": "high",
+      "source": "https://playciso.com/blog/echoleak-cve-2025-32711-copilot-zero-click-chain"
+    },
+    {
+      "category": "identity",
+      "description": "Fake bot user-agents, generic Chrome user-agents, IPs outside published ranges, robots.txt ignored. The most documented website-facing deception; user-agent alone is not identity.",
+      "id": "spoofed-stealth-identity",
+      "match": {
+        "pathPatterns": []
+      },
+      "name": "Spoofed / stealth identity",
+      "severity": "high",
+      "source": "https://blog.cloudflare.com/perplexity-is-using-stealth-undeclared-crawlers-to-evade-website-no-crawl-directives"
+    },
+    {
+      "category": "tool-chaining",
+      "description": "Read private data, then write/send it to a new destination. Catches exfiltration and scope abuse that tool allow-lists miss.",
+      "id": "unsafe-tool-chaining",
+      "match": {
+        "sequence": [
+          "/account",
+          "/api/v1/"
+        ]
+      },
+      "name": "Unsafe tool chaining / read-then-send sequences",
+      "severity": "high",
+      "source": "https://www.promptfoo.dev/docs/red-team/owasp-agentic-ai/"
+    },
+    {
+      "category": "system-attack",
+      "description": "An agent has no business on /admin, internal APIs, metadata endpoints, localhost or secret files. High signal, low false-positive rate.",
+      "id": "admin-internal-ssrf-probing",
+      "match": {
+        "pathPatterns": [
+          "/admin",
+          "/\\.env",
+          "/config",
+          "/\\.git",
+          "/backup"
+        ]
+      },
+      "name": "Probing admin / internal / SSRF targets",
+      "severity": "high",
+      "source": "https://arxiv.org/html/2608.10281v1"
+    },
+    {
+      "category": "mcp",
+      "description": "A previously benign agent or tool suddenly changes description, schema or call pattern. One-time approval is not a control; change detection is the only defence.",
+      "id": "rug-pull-change",
+      "match": {
+        "pathPatterns": []
+      },
+      "name": "Rug-pull / tool-definition change",
+      "severity": "high",
+      "source": "https://anclum.com/en/s/invariantlabs-ai-mcp-injection-experiments/"
+    },
+    {
+      "category": "exfiltration",
+      "description": "Environment dumps, SSH keys, bearer/API keys in outputs or parameters. One leaked token means full privilege; high-entropy strings are automatable to detect.",
+      "id": "credential-harvesting",
+      "match": {
+        "pathPatterns": [
+          "/\\.env",
+          "/config",
+          "/login",
+          "/account/reset"
+        ]
+      },
+      "name": "Credential / token harvesting in agent traffic",
+      "severity": "high",
+      "source": "https://www.sarvins.com/reports/indirect-prompt-injection"
+    },
+    {
+      "category": "availability",
+      "description": "Chain depth, fan-out, cost per session exploding. A single request can fan out to thousands of calls; cost and availability impact even without theft.",
+      "id": "loop-fanout-token-burning",
+      "match": {
+        "minRequestsPerMin": 120
+      },
+      "name": "Agent-loop / fan-out storms and token-burning",
+      "severity": "medium",
+      "source": "https://www.cybersecurity-insiders.com/unbounded-consumption-when-ai-agents-never-learn-to-stop-spending/"
+    },
+    {
+      "category": "scope-drift",
+      "description": "Tool mix, endpoints or data accessed diverge from the session's declared purpose. Catches goal hijack, memory poisoning and misaligned agents that otherwise look normal.",
+      "id": "scope-drift-rogue-agent",
+      "match": {
+        "pathPatterns": []
+      },
+      "name": "Scope drift / rogue-agent behaviour",
+      "severity": "high",
+      "source": "https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/"
+    },
+    {
+      "category": "recon",
+      "description": "An agent systematically probes paths, parameters and hidden APIs to build a map for a later attack. Signals: sequential path scanning, 404 bursts, unusual endpoint order.",
+      "id": "endpoint-enumeration",
+      "match": {
+        "minRequestsPerMin": 60
+      },
+      "name": "Endpoint mapping & enumeration",
+      "severity": "medium",
+      "source": "https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/"
+    },
+    {
+      "category": "data-theft",
+      "description": "Bulk harvesting of content, pricing, PII-shaped data or model-training data beyond any fair-use pattern. Signals: full-catalog traversal, download velocity, headless fingerprints.",
+      "id": "scraping-exfiltration",
+      "match": {
+        "minRequestsPerMin": 100
+      },
+      "name": "Scraping & exfiltration",
+      "severity": "high",
+      "source": "https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/"
+    },
+    {
+      "category": "availability",
+      "description": "Hundreds of coordinated agents generating plausible, expensive requests that exhaust the origin. Signals: correlated fingerprints, synchronised bursts, costly-endpoint focus.",
+      "id": "agent-swarm",
+      "match": {
+        "minRequestsPerMin": 200
+      },
+      "name": "Agent swarm / agentic DDoS",
+      "severity": "high",
+      "source": "https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/"
+    }
+  ],
+  "seedDate": "2026-11-26",
+  "version": 1
+}

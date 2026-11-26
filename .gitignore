@@ -1,0 +1,7 @@
+node_modules/
+.demo-operator-key
+.env
+src/data/blocks.json
+src/data/runtime-state.json
+*.log
+.DS_Store

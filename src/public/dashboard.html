@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guardian Console — Verigus</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 0.75rem 0; }
+  .pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem; background: #eef; }
+  .pill.observe { background: #fff3cd; } .pill.enforce { background: #d4edda; }
+  .pill.block { background: #f8d7da; } .pill.fast { background: #d1ecf1; }
+  pre { background: #f6f6f6; padding: 0.75rem; overflow-x: auto; font-size: 0.8rem; }
+  .readonly { background: #f8d7da; border: 1px solid #f5c6cb; padding: 0.75rem; border-radius: 8px; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h1>🛡 Verigus — Guardian Console <small>— read-only visibility</small></h1>
+<p><em>Every agent verified, every threat remembered.</em></p>
+<p>This dashboard shows everything the guard sees. <strong>It cannot change a verdict.</strong></p>
+<div class="readonly"><strong>NO MANUAL UNBLOCK.</strong> A block, once the guard makes it, is final and permanent — not by the owner, not by the guard, not with time. There is no unblock button anywhere in this product.</div>
+
+<h2>Status</h2>
+<div id="status" class="card">Loading…</div>
+
+<h2>Live incident feed</h2>
+<div id="feed"></div>
+
+<h2>Blocked-agent dossiers</h2>
+<div id="dossiers"></div>
+
+<h2>Learning report (observe mode)</h2>
+<div id="report" class="card">Loading…</div>
+
+<h2>Threat Library</h2>
+<div id="library" class="card">Loading…</div>
+
+<script>
+async function j(p) { const r = await fetch(p); return r.json(); }
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function refresh() {
+  const st = await j('/api/status');
+  document.getElementById('status').innerHTML =
+    `<span class="pill ${st.mode === 'ENFORCE' ? 'enforce' : 'observe'}">${esc(st.mode)}</span> ` +
+    `Baseline confidence ${st.baseline.confidence} · ETA to enforcement: ` +
+    (st.baseline.etaMinutes === null ? '—' : st.baseline.etaMinutes + ' min') +
+    ` · Requests seen ${st.baseline.requestsSeen} · Agents tracked ${st.agentsTracked} ` +
+    `· Blocked (final) ${st.blockedForever} · Fast path active ${st.fastPathActive}<br><small>Library v${st.library.version} · last update ${esc(st.library.lastUpdatedAt || '—')}</small>` +
+    (st.baseline.notifications.length ? '<h3>Notifications</h3>' + st.baseline.notifications.map(n => `<div>📣 ${esc(n.text)}</div>`).join('') : '');
+
+  const feed = await j('/api/feed');
+  document.getElementById('feed').innerHTML = feed.incidents.length
+    ? feed.incidents.map(i => `<div class="card"><span class="pill">${esc(i.kind)}</span> <strong>${esc(i.summary)}</strong><br><small>${esc(i.at)} — ${esc(i.detail || '')}</small></div>`).join('')
+    : '<p>No incidents yet. Run <code>npm run simulate</code> to fire agent traffic.</p>';
+
+  const report = await j('/api/report');
+  document.getElementById('report').innerHTML =
+    `<h3>Part 1 — Normal traffic patterns learned</h3><pre>${esc(JSON.stringify(report.part1NormalPatterns, null, 2))}</pre>` +
+    `<h3>Part 2 — Suspicious findings (carried into enforcement)</h3><pre>${esc(JSON.stringify(report.part2SuspiciousFindings, null, 2))}</pre>`;
+
+  const lib = await j('/api/library');
+  document.getElementById('library').innerHTML =
+    `<strong>v${lib.version}</strong> · ${lib.entries.length} entries · updated daily · last update ${esc(lib.lastUpdatedAt || '—')}<br>` +
+    lib.entries.slice(0, 12).map(e => `<div>• <strong>${esc(e.name)}</strong> <small>(${esc(e.category)} · ${esc(e.severity)})</small></div>`).join('') +
+    (lib.entries.length > 12 ? `<small>…and ${lib.entries.length - 12} more</small>` : '');
+
+  // Dossiers: BLOCKED incidents carry the dossier id — link to the
+  // read-only dossier endpoint. No unblock action exists anywhere.
+  const blockedIncidents = feed.incidents.filter(i => i.kind === 'BLOCKED');
+  document.getElementById('dossiers').innerHTML = blockedIncidents.length
+    ? blockedIncidents.map(i => `<div class="card"><span class="pill block">BLOCKED · FINAL</span> <strong>${esc(i.summary)}</strong><br><small>${esc(i.detail || '')}</small><br>` +
+      (i.dossierId ? `<small>Full dossier: <a href="/api/dossier/${esc(i.dossierId)}">${esc(i.dossierId)}</a> (read-only — no unblock)</small>` : '<small>No dossier id on this incident.</small>') +
+      `</div>`).join('')
+    : '<p>No blocks yet.</p>';
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
