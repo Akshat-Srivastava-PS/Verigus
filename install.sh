@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-line install for Verigus (working model).
 #
-#   curl -fsSL https://raw.githubusercontent.com/Akshat-Srivastava-PS/verigus/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Akshat-Srivastava-PS/Verigus/main/install.sh | bash
 #
 # ...or, from a local checkout:
 #
@@ -13,7 +13,7 @@
 # before ever blocking anything.
 set -euo pipefail
 
-REPO_URL="https://github.com/Akshat-Srivastava-PS/verigus.git"
+REPO_URL="https://github.com/Akshat-Srivastava-PS/Verigus.git"
 DIR="${VERIGUS_DIR:-$HOME/verigus}"
 
 if [ ! -f package.json ]; then

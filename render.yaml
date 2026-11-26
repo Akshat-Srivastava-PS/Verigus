@@ -1,0 +1,12 @@
+# Render Blueprint — deploys Verigus as a free Web Service.
+# The guard reads $PORT (see src/config.js), so no extra config is needed.
+services:
+  - type: web
+    name: verigus
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production

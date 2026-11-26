@@ -68,7 +68,7 @@ blueprint's core end to end, against a small demo shop included in the repo.
 
 ```bash
 # One-line install (once this repo is public/clonable):
-curl -fsSL https://raw.githubusercontent.com/Akshat-Srivastava-PS/verigus/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Akshat-Srivastava-PS/Verigus/main/install.sh | bash
 
 # …or from a checkout:
 npm install && npm start
