@@ -7,10 +7,10 @@
 #
 #   ./install.sh
 #
-# What it does: installs dependencies (none beyond Node.js itself),
-# generates the demo operator key, and starts the guard + demo shop.
-# The guard comes up in OBSERVE mode by default — it learns the site
-# before ever blocking anything.
+# What it does: installs dependencies (none beyond Node.js itself)
+# and starts the guard + demo shop. The guard generates its demo
+# Ed25519 keypair at first start (see README) and comes up in OBSERVE
+# mode by default — it learns the site before ever blocking anything.
 set -euo pipefail
 
 REPO_URL="https://github.com/Akshat-Srivastava-PS/Verigus.git"

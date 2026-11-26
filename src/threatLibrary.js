@@ -30,8 +30,11 @@ class ThreatLibrary {
     this.lastUpdatedAt = raw.seedDate;
   }
 
-  /** Match live behaviour against library entries. Returns matched entries. */
-  match(session, profile) {
+  /** Match live behaviour against library entries. Returns matched entries.
+   * textToScan (optional): request text (query + body) matched against
+   * entries that carry contentPatterns — this is the live indirect
+   * prompt-injection match v0.1 only documented. */
+  match(session, profile, textToScan) {
     const paths = session.requests.map((r) => r.path);
     const hits = [];
     for (const entry of this.entries) {
@@ -49,6 +52,17 @@ class ThreatLibrary {
       if (!matched && m.sequence && this._sequenceMatches(paths, m.sequence)) {
         matched = true;
         why = `request sequence matches ${entry.id}`;
+      }
+      if (!matched && textToScan && Array.isArray(m.contentPatterns)) {
+        for (const pat of m.contentPatterns) {
+          let re;
+          try { re = new RegExp(pat, 'i'); } catch (_) { continue; }
+          if (re.test(textToScan)) {
+            matched = true;
+            why = `request text matches content pattern of ${entry.id}`;
+            break;
+          }
+        }
       }
       if (matched) hits.push({ entry, why });
     }
@@ -100,6 +114,18 @@ class ThreatLibrary {
     }
     // 4. PUSH — version bump; every guard reads the same library object.
     if (report.added > 0) this.version += 1;
+    // 4b. MERGE — cross-site intel network filings (Phase 3): pending
+    // findings filed by protected sites merge into the library here.
+    if (this.intelNetwork) {
+      try {
+        const merged = this.intelNetwork.mergePending();
+        report.intelMerged = merged.merged;
+        report.intelDuplicates = merged.duplicates;
+        if (merged.merged > 0) { this.version += 1; report.added += merged.merged; }
+      } catch (err) {
+        report.intelError = String(err.message || err);
+      }
+    }
     this.lastUpdatedAt = new Date().toISOString();
     // 5. FILE — the refresh itself is the record; findings filed by the guard
     // call fileFinding() during the day and are published at the next refresh.

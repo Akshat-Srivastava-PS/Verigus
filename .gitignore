@@ -1,7 +1,14 @@
 node_modules/
 .demo-operator-key
+.demo-operator-keypair.json
 .env
 src/data/blocks.json
+src/data/state.json
+src/data/state.json.tmp-*
+src/data/state.json.corrupt-*
+src/data/audit.jsonl
+src/data/audit.jsonl.1
 src/data/runtime-state.json
+verigus.site.key.json
 *.log
 .DS_Store

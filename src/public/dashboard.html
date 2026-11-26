@@ -5,76 +5,258 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Guardian Console — Verigus</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; color: #1a1a1a; }
-  h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
-  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 0.75rem 0; }
-  .pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem; background: #eef; }
-  .pill.observe { background: #fff3cd; } .pill.enforce { background: #d4edda; }
-  .pill.block { background: #f8d7da; } .pill.fast { background: #d1ecf1; }
-  pre { background: #f6f6f6; padding: 0.75rem; overflow-x: auto; font-size: 0.8rem; }
-  .readonly { background: #f8d7da; border: 1px solid #f5c6cb; padding: 0.75rem; border-radius: 8px; }
-  small { color: #666; }
+  :root {
+    --bg: #0b0f14; --panel: #12181f; --panel-2: #171f29; --border: #223041;
+    --text: #e6edf3; --muted: #8b98a9; --faint: #5c6b7d;
+    --teal: #2dd4a8; --teal-dim: #123f35;
+    --amber: #fbbf24; --amber-bg: #3a2f10;
+    --green: #34d399; --green-bg: #0f2e24;
+    --red: #f87171; --red-bg: #3a1518;
+    --blue: #60a5fa; --blue-bg: #12283f;
+    --purple: #c084fc;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; }
+  a { color: var(--teal); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 16px; }
+  header h1 { font-size: 1.5rem; margin: 0; letter-spacing: -0.01em; }
+  header h1 .shield { color: var(--teal); }
+  header .tagline { color: var(--muted); font-style: italic; }
+  header .right { margin-left: auto; color: var(--faint); font-size: 0.85rem; }
+  .unblock-banner { background: var(--red-bg); border: 1px solid #7f1d1d; border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; font-size: 0.95rem; }
+  .unblock-banner strong { color: var(--red); letter-spacing: 0.04em; }
+  .hero { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+  .card h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 12px; }
+  .card h3 { font-size: 0.95rem; margin: 14px 0 6px; }
+  .mode-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .mode-pill { display: inline-block; padding: 4px 14px; border-radius: 999px; font-weight: 700; font-size: 1rem; letter-spacing: 0.05em; }
+  .mode-pill.observe { background: var(--amber-bg); color: var(--amber); }
+  .mode-pill.enforce { background: var(--green-bg); color: var(--green); }
+  .conf-bar { height: 8px; background: #1c2632; border-radius: 999px; overflow: hidden; margin: 10px 0 4px; }
+  .conf-fill { height: 100%; background: var(--teal); border-radius: 999px; transition: width 0.5s; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .stat .num { font-size: 1.35rem; font-weight: 700; line-height: 1.1; }
+  .stat .num.red { color: var(--red); }
+  .stat .num.teal { color: var(--teal); }
+  .stat .lbl { color: var(--muted); font-size: 0.8rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid .wide { grid-column: 1 / -1; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; background: #1c2632; color: var(--muted); }
+  .pill.block { background: var(--red-bg); color: var(--red); }
+  .pill.fast { background: var(--teal-dim); color: var(--teal); }
+  .pill.warn { background: var(--amber-bg); color: var(--amber); }
+  .pill.info { background: var(--blue-bg); color: var(--blue); }
+  .feed-item { border-left: 3px solid var(--border); padding: 8px 12px; margin: 8px 0; background: var(--panel-2); border-radius: 0 8px 8px 0; }
+  .feed-item.blocked { border-left-color: var(--red); }
+  .feed-item.demoted { border-left-color: var(--amber); }
+  .feed-item.fast { border-left-color: var(--teal); }
+  pre { background: #0d1218; border: 1px solid var(--border); padding: 10px 12px; overflow-x: auto; font-size: 0.8rem; border-radius: 8px; color: #c9d4e0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); padding: 6px 8px; }
+  td { border-bottom: 1px solid #182230; padding: 6px 8px; vertical-align: top; }
+  code { background: #1c2632; padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+  small, .muted { color: var(--muted); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.85em; }
+  .empty { color: var(--faint); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; font-size: 0.9rem; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  footer { margin-top: 24px; color: var(--faint); font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 12px; }
+  @media (max-width: 800px) { .hero, .grid { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); } }
 </style>
 </head>
 <body>
-<h1>🛡 Verigus — Guardian Console <small>— read-only visibility</small></h1>
-<p><em>Every agent verified, every threat remembered.</em></p>
-<p>This dashboard shows everything the guard sees. <strong>It cannot change a verdict.</strong></p>
-<div class="readonly"><strong>NO MANUAL UNBLOCK.</strong> A block, once the guard makes it, is final and permanent — not by the owner, not by the guard, not with time. There is no unblock button anywhere in this product.</div>
+<div class="wrap">
+  <header>
+    <h1><span class="shield">🛡</span> Verigus <span style="color:var(--muted); font-weight:400">— Guardian Console</span></h1>
+    <span class="tagline">Every agent verified, every threat remembered.</span>
+    <span class="right">read-only visibility · <span id="clock"></span></span>
+  </header>
 
-<h2>Status</h2>
-<div id="status" class="card">Loading…</div>
+  <div class="unblock-banner"><strong>NO MANUAL UNBLOCK.</strong> A block, once the guard makes it, is final and permanent — not by the owner, not by the guard, not with time. There is no unblock button anywhere in this product. This console shows everything the guard sees. <strong>It cannot change a verdict.</strong></div>
 
-<h2>Live incident feed</h2>
-<div id="feed"></div>
+  <div class="hero">
+    <div class="card">
+      <h2>Guard status</h2>
+      <div id="statusHero">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Notifications</h2>
+      <div id="notifications">Loading…</div>
+    </div>
+  </div>
 
-<h2>Blocked-agent dossiers</h2>
-<div id="dossiers"></div>
+  <div class="grid">
+    <div class="card">
+      <h2>Live incident feed</h2>
+      <div id="feed">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Blocked-agent dossiers</h2>
+      <div id="dossiers">Loading…</div>
+    </div>
+    <div class="card wide">
+      <h2>Learning report — observe mode</h2>
+      <div id="report">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Agent reputation registry</h2>
+      <div id="reputation">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Per-endpoint &amp; transaction policies</h2>
+      <div id="policies">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Data-integrity watch</h2>
+      <div id="integrity">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Compliance &amp; SIEM</h2>
+      <div id="compliance">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Threat Library</h2>
+      <div id="library">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Agent contract &amp; intel network</h2>
+      <div id="contract">Loading…</div>
+    </div>
+    <div class="card">
+      <h2>Community detection rules</h2>
+      <div id="rules">Loading…</div>
+    </div>
+  </div>
 
-<h2>Learning report (observe mode)</h2>
-<div id="report" class="card">Loading…</div>
-
-<h2>Threat Library</h2>
-<div id="library" class="card">Loading…</div>
+  <footer>
+    Verigus Guardian Console — read-only. Blocks are final and permanent. Audit log export: <a href="/api/audit/export">/api/audit/export</a> · Compliance report: <a href="/api/compliance/report">/api/compliance/report</a> · Status JSON: <a href="/api/status">/api/status</a>
+  </footer>
+</div>
 
 <script>
-async function j(p) { const r = await fetch(p); return r.json(); }
+async function j(p) { try { const r = await fetch(p); if (!r.ok) return null; return await r.json(); } catch (_) { return null; } }
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function pillFor(kind) {
+  const k = String(kind || '').toUpperCase();
+  if (k === 'BLOCKED') return 'block';
+  if (k === 'FAST_PATH') return 'fast';
+  if (k === 'DEMOTED' || k === 'POLICY_DENY' || k === 'INJECTION' || k === 'INTEGRITY') return 'warn';
+  if (k === 'RE-CHECK') return 'info';
+  return '';
+}
 
 async function refresh() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+
   const st = await j('/api/status');
-  document.getElementById('status').innerHTML =
-    `<span class="pill ${st.mode === 'ENFORCE' ? 'enforce' : 'observe'}">${esc(st.mode)}</span> ` +
-    `Baseline confidence ${st.baseline.confidence} · ETA to enforcement: ` +
-    (st.baseline.etaMinutes === null ? '—' : st.baseline.etaMinutes + ' min') +
-    ` · Requests seen ${st.baseline.requestsSeen} · Agents tracked ${st.agentsTracked} ` +
-    `· Blocked (final) ${st.blockedForever} · Fast path active ${st.fastPathActive}<br><small>Library v${st.library.version} · last update ${esc(st.library.lastUpdatedAt || '—')}</small>` +
-    (st.baseline.notifications.length ? '<h3>Notifications</h3>' + st.baseline.notifications.map(n => `<div>📣 ${esc(n.text)}</div>`).join('') : '');
+  if (st) {
+    const confPct = Math.round(st.baseline.confidence * 100);
+    document.getElementById('statusHero').innerHTML =
+      `<div class="mode-row"><span class="mode-pill ${st.mode === 'ENFORCE' ? 'enforce' : 'observe'}">${esc(st.mode)}</span>` +
+      `<span class="muted">site <code>${esc(st.site)}</code></span></div>` +
+      `<div class="conf-bar"><div class="conf-fill" style="width:${confPct}%"></div></div>` +
+      `<small>Baseline confidence ${confPct}% · ETA to enforcement: ${st.baseline.etaMinutes === null ? '—' : st.baseline.etaMinutes + ' min'} · agent pace p95 ${st.baseline.agentPaceP95}/min</small>` +
+      `<div class="stats">` +
+      `<div class="stat"><div class="num">${st.baseline.requestsSeen}</div><div class="lbl">Requests seen</div></div>` +
+      `<div class="stat"><div class="num">${st.agentsTracked}</div><div class="lbl">Agents tracked</div></div>` +
+      `<div class="stat"><div class="num red">${st.blockedForever}</div><div class="lbl">Blocked (final)</div></div>` +
+      `<div class="stat"><div class="num teal">${st.fastPathActive}</div><div class="lbl">Fast path active</div></div>` +
+      `<div class="stat"><div class="num">${st.library.version}</div><div class="lbl">Library v · ${st.library.entries} entries</div></div>` +
+      `<div class="stat"><div class="num">${st.reputation ? st.reputation.identities : '—'}</div><div class="lbl">Reputation identities</div></div>` +
+      `</div>` +
+      (st.agentPulse && st.agentPulse.signal ? `<small>AgentPulse feed: ${st.agentPulse.signal.totalBreakingChanges} breaking changes · ${st.agentPulse.signal.activeIncidents} active incidents${st.agentPulse.lastError ? ' · <span style="color:var(--amber)">feed error: ' + esc(st.agentPulse.lastError) + '</span>' : ''}</small>` : '');
+
+    document.getElementById('notifications').innerHTML = st.baseline.notifications.length
+      ? st.baseline.notifications.map(n => `<div style="margin:6px 0">📣 ${esc(n.text)}<br><small>${esc(n.at)} · ${esc(n.kind)}</small></div>`).join('')
+      : '<p class="empty">No notifications yet. The guard notifies here when it is ready to enforce.</p>';
+
+    document.getElementById('integrity').innerHTML = st.integrity
+      ? `<dl class="kv"><dt>Content registered</dt><dd>${st.integrity.contentRegistered} items</dd>` +
+        `<dt>Poisoned snippets found</dt><dd>${st.integrity.poisonedSnippets}</dd>` +
+        `<dt>Last check</dt><dd>${esc(st.integrity.lastCheckedAt || '—')}</dd></dl>` +
+        (st.integrity.findings.length ? st.integrity.findings.map(f => `<div class="feed-item"><strong>${esc(f.kind)}</strong> — ${esc(f.detail || '')}<br><small>${esc(f.at)}</small></div>`).join('') : '<p class="empty">No integrity findings. Content hashes match the registered baseline.</p>')
+      : '<p class="empty">Integrity watch unavailable.</p>';
+  }
 
   const feed = await j('/api/feed');
-  document.getElementById('feed').innerHTML = feed.incidents.length
-    ? feed.incidents.map(i => `<div class="card"><span class="pill">${esc(i.kind)}</span> <strong>${esc(i.summary)}</strong><br><small>${esc(i.at)} — ${esc(i.detail || '')}</small></div>`).join('')
-    : '<p>No incidents yet. Run <code>npm run simulate</code> to fire agent traffic.</p>';
+  if (feed) {
+    document.getElementById('feed').innerHTML = feed.incidents.length
+      ? feed.incidents.slice(0, 20).map(i => `<div class="feed-item ${i.kind === 'BLOCKED' ? 'blocked' : i.kind === 'DEMOTED' ? 'demoted' : i.kind === 'FAST_PATH' ? 'fast' : ''}"><span class="pill ${pillFor(i.kind)}">${esc(i.kind)}</span> <strong>${esc(i.summary)}</strong><br><small>${esc(i.at)} — ${esc(i.detail || '')}</small></div>`).join('')
+      : '<p class="empty">No incidents yet. Run <code>npm run simulate</code> to fire agent traffic.</p>';
+
+    const blockedIncidents = feed.incidents.filter(i => i.kind === 'BLOCKED');
+    document.getElementById('dossiers').innerHTML = blockedIncidents.length
+      ? blockedIncidents.map(i => `<div class="feed-item blocked"><span class="pill block">BLOCKED · FINAL</span> <strong>${esc(i.summary)}</strong><br><small>${esc(i.at)} — ${esc(i.detail || '')}</small><br>` +
+        (i.dossierId ? `<small>Full dossier: <a href="/api/dossier/${esc(i.dossierId)}">${esc(i.dossierId)}</a> (read-only — no unblock)</small>` : '<small>No dossier id on this incident.</small>') +
+        `</div>`).join('')
+      : '<p class="empty">No blocks yet.</p>';
+  }
 
   const report = await j('/api/report');
-  document.getElementById('report').innerHTML =
-    `<h3>Part 1 — Normal traffic patterns learned</h3><pre>${esc(JSON.stringify(report.part1NormalPatterns, null, 2))}</pre>` +
-    `<h3>Part 2 — Suspicious findings (carried into enforcement)</h3><pre>${esc(JSON.stringify(report.part2SuspiciousFindings, null, 2))}</pre>`;
+  if (report) {
+    document.getElementById('report').innerHTML =
+      `<h3>Part 1 — Normal traffic patterns learned</h3><pre>${esc(JSON.stringify(report.part1NormalPatterns, null, 2))}</pre>` +
+      `<h3>Part 2 — Suspicious findings (carried into enforcement)</h3><pre>${esc(JSON.stringify(report.part2SuspiciousFindings, null, 2))}</pre>`;
+  }
+
+  const rep = await j('/api/reputation');
+  if (rep) {
+    document.getElementById('reputation').innerHTML =
+      `<small>${rep.identities} identities tracked · worst first (score 0–100, 50 neutral)</small>` +
+      (rep.worst && rep.worst.length ? `<table><tr><th>Identity</th><th>Score</th><th>Requests</th><th>Mismatches</th><th>Demotions</th><th>Blocks</th></tr>` +
+        rep.worst.map(r => `<tr><td class="mono">${esc(r.identity.slice(0, 32))}</td><td>${r.score}</td><td>${r.requests}</td><td>${r.mismatches}</td><td>${r.demotions}</td><td>${r.blocks}</td></tr>`).join('') + `</table>`
+        : '<p class="empty">No reputation records yet.</p>');
+  }
+
+  const pol = await j('/api/policies');
+  if (pol) {
+    document.getElementById('policies').innerHTML =
+      `<small>Policy set v${pol.version} · ${pol.endpoints.length} endpoint rules (first match wins)</small>` +
+      `<table><tr><th>Pattern</th><th>Methods</th><th>Max risk</th><th>Mandate</th></tr>` +
+      pol.endpoints.map(e => `<tr><td class="mono">${esc(e.pattern)}</td><td>${esc(e.methods.join(', '))}</td><td>${e.maxRisk}</td><td>${e.requireMandate ? 'required' : '—'}</td></tr>`).join('') + `</table>`;
+  }
+
+  const comp = await j('/api/compliance/report');
+  if (comp) {
+    const decisions = Object.entries(comp.decisions || {}).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ') || 'none yet';
+    document.getElementById('compliance').innerHTML =
+      `<dl class="kv"><dt>Mode</dt><dd>${esc(comp.mode)}</dd>` +
+      `<dt>Requests / agents / blocked</dt><dd>${comp.totals.requestsSeen} / ${comp.totals.agentsTracked} / ${comp.totals.blockedForever}</dd>` +
+      `<dt>Policies / rules</dt><dd>${comp.policies.endpoints} endpoints (v${comp.policies.version}) · ${comp.rules.enabled} community rules enabled</dd>` +
+      `<dt>Decisions (audit)</dt><dd>${decisions}</dd>` +
+      `<dt>SIEM forwarding</dt><dd>${comp.agentPulse ? 'webhook configured via SIEM_WEBHOOK_URL when set' : 'not configured'}</dd></dl>` +
+      `<small>${esc(comp.retention)}</small><br><small>Full report: <a href="/api/compliance/report">/api/compliance/report</a> · Audit export: <a href="/api/audit/export">/api/audit/export</a></small>`;
+  }
 
   const lib = await j('/api/library');
-  document.getElementById('library').innerHTML =
-    `<strong>v${lib.version}</strong> · ${lib.entries.length} entries · updated daily · last update ${esc(lib.lastUpdatedAt || '—')}<br>` +
-    lib.entries.slice(0, 12).map(e => `<div>• <strong>${esc(e.name)}</strong> <small>(${esc(e.category)} · ${esc(e.severity)})</small></div>`).join('') +
-    (lib.entries.length > 12 ? `<small>…and ${lib.entries.length - 12} more</small>` : '');
+  if (lib) {
+    document.getElementById('library').innerHTML =
+      `<strong>v${lib.version}</strong> · ${lib.entries.length} entries · updated daily · last update ${esc(lib.lastUpdatedAt || '—')}<br>` +
+      lib.entries.slice(0, 12).map(e => `<div>• <strong>${esc(e.name)}</strong> <small>(${esc(e.category)} · ${esc(e.severity)})</small></div>`).join('') +
+      (lib.entries.length > 12 ? `<small>…and ${lib.entries.length - 12} more</small>` : '');
+  }
 
-  // Dossiers: BLOCKED incidents carry the dossier id — link to the
-  // read-only dossier endpoint. No unblock action exists anywhere.
-  const blockedIncidents = feed.incidents.filter(i => i.kind === 'BLOCKED');
-  document.getElementById('dossiers').innerHTML = blockedIncidents.length
-    ? blockedIncidents.map(i => `<div class="card"><span class="pill block">BLOCKED · FINAL</span> <strong>${esc(i.summary)}</strong><br><small>${esc(i.detail || '')}</small><br>` +
-      (i.dossierId ? `<small>Full dossier: <a href="/api/dossier/${esc(i.dossierId)}">${esc(i.dossierId)}</a> (read-only — no unblock)</small>` : '<small>No dossier id on this incident.</small>') +
-      `</div>`).join('')
-    : '<p>No blocks yet.</p>';
+  const [contract, intelSt] = await Promise.all([j('/api/agent-contract'), j('/v1/intel/status')]);
+  let contractHtml = '';
+  if (contract) {
+    contractHtml += `<h3>Published agent contract</h3><small>Allow: ${contract.allow.map(esc).join(', ')}<br>Disallow: ${contract.disallow.map(esc).join(', ')}<br>Auth: ${esc(contract.authentication)}<br>MCP door: <code>${esc(contract.mcpDoor)}</code> · <a href="/agents.txt">/agents.txt</a></small>`;
+  }
+  if (intelSt) {
+    contractHtml += `<h3>Cross-site intel network</h3><small>${intelSt.pending} findings pending merge · ${intelSt.mergedTotal} merged into the library · last merge ${esc(intelSt.lastMerge || '—')}</small>`;
+  }
+  if (contractHtml) document.getElementById('contract').innerHTML = contractHtml;
+
+  const rules = await j('/api/rules');
+  if (rules) {
+    document.getElementById('rules').innerHTML =
+      (rules.enabled.length ? rules.enabled.map(r => `<div>• <strong>${esc(r.name)}</strong> <small>(${esc(r.id)} · v${r.version} · ${esc(r.author)} · +${r.risk} risk · ${esc(r.action)})</small></div>`).join('') : '<p class="empty">No community rules enabled.</p>') +
+      (rules.invalid.length ? `<h3>Invalid rule files (not loaded)</h3>` + rules.invalid.map(x => `<div><code>${esc(x.file)}</code> — ${esc(x.errors.join('; '))}</div>`).join('') : '');
+  }
 }
 refresh();
 setInterval(refresh, 5000);

@@ -3,44 +3,41 @@
 // Default for a first-time agent: observe & score — never challenge or block
 // on arrival. The one shortcut is the verified fast path, granted only when
 // ALL THREE checks pass, and re-checked continuously for the whole session:
-//   Check 1 — identity verifies (cryptographic attestation)
+//   Check 1 — identity verifies (Web Bot Auth Ed25519, RFC 9421, against
+//             operator-published keys; a signed A2A agent card is the
+//             second accepted form of identity)
 //   Check 2 — purpose is authentic, harmless, and permitted here
 //   Check 3 — behaviour matches the stated purpose
 // Any failure or drift demotes the agent mid-session back to L1
-// (observe & score), and the mismatch is recorded on its profile.
+// (observe & score), and the mismatch is recorded on its profile and in
+// the reputation registry.
 //
-// DEMO NOTE: real deployments verify Web Bot Auth (Ed25519) signatures or
-// signed A2A agent cards against operator-published keys. This working model
-// simulates that attestation with an HMAC over (operator, purpose, timestamp)
-// using a demo operator key generated fresh at first start — see server.js.
-// The check structure (identity + purpose + behaviour) is the real product
-// rule; only the signature scheme is a demo stand-in.
+// The v0.1 HMAC attestation stand-in is gone: identity is verified for
+// real. The simulator's demo Ed25519 keypair (operator "demo-agent") is
+// the only demo fixture left, and it is registered like any operator key.
 'use strict';
 
-const crypto = require('crypto');
 const config = require('./config');
+const webBotAuth = require('./webBotAuth');
+const delegation = require('./delegation');
 
-/** Verify the agent's presented attestation (demo HMAC stand-in). */
-function verifyIdentity(agent, demoOperatorKey) {
-  if (!agent.operator || !agent.signature || !agent.signedAt) {
-    return { ok: false, reason: 'no identity presented' };
+/** Check 1 — identity verifies (Web Bot Auth, or a signed A2A agent card). */
+async function verifyIdentity(agent, registry) {
+  // Web Bot Auth first.
+  const wba = await webBotAuth.verifyWebBotAuth(
+    { method: agent.method || 'GET', url: agent.url || '/', headers: agent.headers || {} },
+    registry
+  );
+  if (wba.ok) return { ok: true, method: 'web-bot-auth', operator: wba.operator, reason: wba.reason };
+  // A2A agent card second (presented as a decoded card object on the agent).
+  if (agent.card) {
+    const card = delegation.verifyAgentCard(agent.card, registry);
+    if (card.ok) {
+      return { ok: true, method: 'a2a-agent-card', operator: card.card.name, reason: card.reason };
+    }
+    return { ok: false, reason: `A2A card invalid: ${card.reason}; Web Bot Auth also failed: ${wba.reason}` };
   }
-  const expected = crypto
-    .createHmac('sha256', demoOperatorKey)
-    .update(`${agent.operator}|${agent.purpose || ''}|${agent.signedAt}`)
-    .digest('hex');
-  // Timing-safe compare on equal-length hex strings.
-  let ok = false;
-  try {
-    ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(agent.signature));
-  } catch (_) {
-    ok = false;
-  }
-  if (!ok) return { ok: false, reason: 'signature does not verify against operator keys' };
-  if (Date.now() - Number(agent.signedAt) > 15 * 60 * 1000) {
-    return { ok: false, reason: 'attestation expired' };
-  }
-  return { ok: true, reason: 'identity verified' };
+  return { ok: false, reason: wba.reason };
 }
 
 /** Check 2 — purpose is specific, permitted on this site, and plausible. */
@@ -72,10 +69,14 @@ function checkBehaviourMatch(agent, session) {
 
 /**
  * Evaluate the fast path for an agent on its current session.
+ * agent: { operator, purpose, method, url, headers, card? }
+ * precomputedIdentity (optional): result of verifyIdentity() for this
+ * request — the guard computes it once and reuses it for the fast path
+ * and the policy checks, so a key is never fetched twice per request.
  * Returns { granted, checks: {identity, purpose, behaviour}, reason }.
  */
-function evaluateFastPath(agent, session, demoOperatorKey) {
-  const identity = verifyIdentity(agent, demoOperatorKey);
+async function evaluateFastPath(agent, session, registry, precomputedIdentity) {
+  const identity = precomputedIdentity || await verifyIdentity(agent, registry);
   const purpose = checkPurpose(agent);
   const behaviour = checkBehaviourMatch(agent, session);
   const granted = identity.ok && purpose.ok && behaviour.ok;
@@ -83,7 +84,7 @@ function evaluateFastPath(agent, session, demoOperatorKey) {
     granted,
     checks: { identity, purpose, behaviour },
     reason: granted
-      ? 'verified identity + authentic purpose + behaviour match — fast path granted'
+      ? `verified identity (${identity.method}) + authentic purpose + behaviour match — fast path granted`
       : `fast path denied: ${[identity, purpose, behaviour].filter((c) => !c.ok).map((c) => c.reason).join('; ')}`,
   };
 }
@@ -93,8 +94,8 @@ function evaluateFastPath(agent, session, demoOperatorKey) {
  * the fast path. Returns { stillValid, reason }. A failure demotes the
  * agent to L1 (observe & score) and records the mismatch on its profile.
  */
-function recheckFastPath(agent, session, demoOperatorKey) {
-  const result = evaluateFastPath(agent, session, demoOperatorKey);
+async function recheckFastPath(agent, session, registry) {
+  const result = await evaluateFastPath(agent, session, registry);
   return { stillValid: result.granted, reason: result.reason, checks: result.checks };
 }
 

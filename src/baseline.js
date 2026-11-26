@@ -125,6 +125,41 @@ class Baseline {
     this.notifications.push({ at: new Date().toISOString(), kind, text });
   }
 
+  /** Serialize the baseline for the durable store (survives restarts). */
+  serialize() {
+    return {
+      requestsSeen: this.requestsSeen,
+      agentsSeen: [...this.agentsSeen],
+      endpointCounts: [...this.endpointCounts.entries()],
+      endpointHistory: this.endpointHistory.slice(-2000),
+      agentPaceSamples: this.agentPaceSamples.slice(-500),
+      startedAt: this.startedAt,
+      ready: this.ready,
+      readyAt: this.readyAt,
+      frozenPaceP95: this.frozenPaceP95,
+      etaMinutes: this.etaMinutes,
+      notifications: this.notifications.slice(-10),
+      lastEtaNotifiedAt: this.lastEtaNotifiedAt,
+    };
+  }
+
+  /** Restore a serialized baseline (from the durable store). */
+  restore(data) {
+    if (!data || typeof data !== 'object') return;
+    this.requestsSeen = data.requestsSeen || 0;
+    this.agentsSeen = new Set(Array.isArray(data.agentsSeen) ? data.agentsSeen : []);
+    this.endpointCounts = new Map(Array.isArray(data.endpointCounts) ? data.endpointCounts : []);
+    this.endpointHistory = Array.isArray(data.endpointHistory) ? data.endpointHistory : [];
+    this.agentPaceSamples = Array.isArray(data.agentPaceSamples) ? data.agentPaceSamples : [];
+    if (data.startedAt) this.startedAt = data.startedAt;
+    this.ready = !!data.ready;
+    this.readyAt = data.readyAt || null;
+    this.frozenPaceP95 = typeof data.frozenPaceP95 === 'number' ? data.frozenPaceP95 : null;
+    this.etaMinutes = typeof data.etaMinutes === 'number' ? data.etaMinutes : null;
+    this.notifications = Array.isArray(data.notifications) ? data.notifications : [];
+    this.lastEtaNotifiedAt = data.lastEtaNotifiedAt || 0;
+  }
+
   status() {
     return {
       mode: this.ready ? 'ENFORCE' : 'OBSERVE',

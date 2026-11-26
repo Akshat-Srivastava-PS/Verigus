@@ -33,29 +33,48 @@ test('ladder maps risk to rungs (L0 allow … L5 block)', () => {
   assert.equal(scoring.ladderFor(95).rung, 'L5');
 });
 
-test('fast path requires identity AND authentic purpose AND behaviour match', () => {
-  const key = 'test-demo-key';
-  const crypto = require('crypto');
-  const sign = (op, purpose) => {
-    const signedAt = String(Date.now());
+test('fast path requires identity AND authentic purpose AND behaviour match', async () => {
+  const webBotAuth = require('../src/webBotAuth');
+  const keypair = webBotAuth.generateKeypair();
+  const registry = { byKeyid: new Map(), byOperator: new Map() };
+  const rec = { operator: 'ShopBot Inc', keyid: 'shopbot-key-1', publicKey: keypair.publicKeyPem, domain: 'shopbot.example' };
+  registry.byKeyid.set('shopbot-key-1', rec);
+  registry.byOperator.set('ShopBot Inc', rec);
+  // Each request is signed separately: @path and @query are covered components.
+  const makeAgent = (purpose, requestPath) => {
+    const [pathOnly, queryRaw] = requestPath.split('?');
+    const signed = webBotAuth.signRequest({
+      method: 'GET', authority: 'localhost:3000', path: pathOnly, query: queryRaw ? `?${queryRaw}` : '',
+      agent: 'ShopBot Inc', privateKeyPem: keypair.privateKeyPem, keyid: 'shopbot-key-1',
+    });
     return {
-      signature: crypto.createHmac('sha256', key).update(`${op}|${purpose}|${signedAt}`).digest('hex'),
-      signedAt,
+      operator: 'ShopBot Inc', purpose, method: 'GET', url: requestPath,
+      headers: {
+        host: 'localhost:3000',
+        'signature-agent': signed.signatureAgent,
+        'signature-input': signed.signatureInput,
+        signature: signed.signature,
+      },
     };
   };
-  const agent = { operator: 'ShopBot Inc', purpose: 'price comparison', ...sign('ShopBot Inc', 'price comparison') };
   const session = fakeSession(['/products', '/pricing']);
-  const ok = firstContact.evaluateFastPath(agent, session, key);
+  const ok = await firstContact.evaluateFastPath(makeAgent('price comparison', '/pricing'), session, registry);
   assert.equal(ok.granted, true, 'verified identity + authentic purpose + matching behaviour grants the fast path');
+  assert.equal(ok.checks.identity.method, 'web-bot-auth');
 
   // Same agent, behaviour drifts to account endpoints -> denied.
   const drifted = fakeSession(['/products', '/account', '/login']);
-  const denied = firstContact.evaluateFastPath(agent, drifted, key);
+  const denied = await firstContact.evaluateFastPath(makeAgent('price comparison', '/login'), drifted, registry);
   assert.equal(denied.granted, false, 'behaviour outside the purpose shape denies the fast path');
 
   // Identity alone is never enough: unsigned agent.
-  const unsigned = { operator: null, purpose: 'price comparison', signature: null, signedAt: null };
-  assert.equal(firstContact.evaluateFastPath(unsigned, session, key).granted, false);
+  const unsigned = { operator: null, purpose: 'price comparison', method: 'GET', url: '/pricing', headers: { host: 'localhost:3000' } };
+  assert.equal((await firstContact.evaluateFastPath(unsigned, session, registry)).granted, false);
+
+  // A tampered signature fails verification.
+  const tampered = makeAgent('price comparison', '/pricing');
+  tampered.headers.signature = tampered.headers.signature.replace(/.$/, 'A');
+  assert.equal((await firstContact.evaluateFastPath(tampered, session, registry)).granted, false, 'tampered signature must not grant the fast path');
 });
 
 test('a block is final: no unblock method exists and blocked stays blocked', () => {
@@ -75,18 +94,23 @@ test('threat library seeds with the research top 10', () => {
   assert.ok(lib.entries.length >= 10);
 });
 
-test('three throttles escalate to a final block', () => {
+test('three throttles escalate to a final block', async () => {
   // A repeat offender that keeps coming back at throttle level is escalated
   // to a permanent block on the third strike — the block risk is the
   // decision risk (score + library boost), and the block is final.
-  // The guard gets a scratch blocks file so a block saved by one test run
-  // cannot make the next run's agent already-blocked from request one.
+  // The guard gets scratch state + audit files so a block saved by one
+  // test run cannot make the next run's agent already-blocked from request one.
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
-  const scratchBlocks = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'verigus-test-')), 'blocks.json');
+  const { Store } = require('../src/store');
+  const { AuditLog } = require('../src/audit');
+  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verigus-test-'));
+  const store = new Store(path.join(scratchDir, 'state.json'));
+  const audit = new AuditLog(path.join(scratchDir, 'audit.jsonl'));
   const lib = new ThreatLibrary(null);
-  const guard = new Guard({ library: lib, agentPulse: null, demoOperatorKey: 'test-key', blocksPath: scratchBlocks });
+  const registry = { byKeyid: new Map(), byOperator: new Map() };
+  const guard = new Guard({ library: lib, agentPulse: null, registry, store, audit });
   guard.baseline.ready = true;
   guard.baseline.frozenPaceP95 = 58;
   const headers = {
@@ -96,16 +120,16 @@ test('three throttles escalate to a final block', () => {
     'x-agent-domain': '',
     'x-agent-country': 'US',
   };
-  const mkReq = () => ({ path: '/api/v1/products', method: 'GET', headers, socket: { remoteAddress: '127.0.0.1' } });
+  const mkReq = () => ({ path: '/api/v1/products', method: 'GET', url: '/api/v1/products', headers, socket: { remoteAddress: '127.0.0.1' } });
   const seen = [];
   for (let i = 0; i < 40; i++) {
-    const d = guard.handle(mkReq());
+    const d = await guard.handle(mkReq());
     seen.push(d.action);
     if (d.action === 'block') break;
   }
   assert.ok(seen.filter((a) => a === 'throttle').length >= 2, 'agent is throttled before the block');
   assert.equal(seen[seen.length - 1], 'block', 'third strike escalates to a block');
-  const again = guard.handle(mkReq());
+  const again = await guard.handle(mkReq());
   assert.equal(again.action, 'block', 'block is final on the next request too');
   assert.ok(again.dossierId, 'blocked response carries the dossier id');
   const dossier = [...guard.blocked.values()].find((d) => d.id === again.dossierId);
